@@ -3,21 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>iPad BLE DEBUG</title>
+    <title>iPad BLE DUAL MONITOR</title>
     <style>
         body { background: #000; color: #00FF00; font-family: monospace; padding: 20px; font-size: 14px; }
         .box { border: 1px solid #444; padding: 15px; margin-bottom: 10px; border-radius: 8px; background: #111; }
-        .label { color: #888; font-size: 11px; }
-        .val { font-size: 36px; font-weight: bold; color: #fff; }
+        .label { color: #888; font-size: 11px; text-transform: uppercase; }
+        .val-container { display: flex; justify-content: space-around; align-items: center; }
+        .val-group { text-align: center; }
+        .val { font-size: 48px; font-weight: bold; color: #fff; display: block; }
+        .unit { font-size: 14px; color: #00FF00; }
         button { width: 100%; padding: 20px; font-size: 18px; font-weight: bold; background: #E4002B; color: #fff; border: none; border-radius: 10px; cursor: pointer; }
-        #log { font-size: 10px; color: #aaa; height: 250px; overflow-y: auto; background: #050505; padding: 10px; margin-top: 15px; border: 1px solid #333; }
+        #log { font-size: 10px; color: #aaa; height: 200px; overflow-y: auto; background: #050505; padding: 10px; margin-top: 15px; border: 1px solid #333; }
     </style>
 </head>
 <body>
 
     <div class="box">
-        <div class="label">RPM RAW (Hz)</div>
-        <div id="raw_rpm" class="val">WAITING...</div>
+        <div class="val-container">
+            <div class="val-group">
+                <div class="label">Rotation</div>
+                <span id="display_hz" class="val">---</span>
+                <span class="unit">Hz</span>
+            </div>
+            <div style="width: 1px; height: 50px; background: #333;"></div>
+            <div class="val-group">
+                <div class="label">Temperature</div>
+                <span id="display_temp" class="val">---</span>
+                <span class="unit">°C</span>
+            </div>
+        </div>
     </div>
 
     <button id="connectBtn">CONNECT START</button>
@@ -25,8 +39,9 @@
     <div id="log">--- System Debug Log ---<br></div>
 
     <script>
+        // 成功実績のあるUUIDをそのまま使用
         const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-        const PULSE_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
+        const PULSE_UUID   = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
 
         function addLog(msg) {
             const log = document.getElementById('log');
@@ -35,13 +50,13 @@
         }
 
         document.getElementById('connectBtn').onclick = async () => {
-            addLog("Step 1: Scanning...");
+            addLog("Step 1: Scanning for kfac...");
             try {
                 const device = await navigator.bluetooth.requestDevice({
                     filters: [{ services: [SERVICE_UUID] }]
                 });
 
-                addLog("Step 2: Connecting...");
+                addLog("Step 2: Connecting to GATT...");
                 const server = await device.gatt.connect();
                 
                 addLog("Step 3: Stability Wait (2s)...");
@@ -51,11 +66,12 @@
                 const service = await server.getPrimaryService(SERVICE_UUID);
                 const pC = await service.getCharacteristic(PULSE_UUID);
 
-                // --- 読み取りテスト ---
-                addLog("Step 5: Direct Read Test...");
-                const initVal = await pC.readValue();
-                addLog("READ SUCCESS: " + initVal.getUint8(0));
-                document.getElementById('raw_rpm').textContent = initVal.byteLength >= 2 ? initVal.getUint16(0, true) : initVal.getUint8(0);
+                // --- 初回読み取りテスト ---
+                addLog("Step 5: Initial Read Test...");
+                const initData = await pC.readValue();
+                if (initData.byteLength >= 3) {
+                    addLog("READ SUCCESS: 3 bytes detected");
+                }
 
                 // --- 通知開始 ---
                 addLog("Step 6: Starting Notifications...");
@@ -64,12 +80,25 @@
                 
                 pC.oncharacteristicvaluechanged = (e) => {
                     const data = e.target.value;
-                    let val = data.byteLength >= 2 ? data.getUint16(0, true) : data.getUint8(0);
-                    document.getElementById('raw_rpm').textContent = val;
-                    addLog("RCVD: " + val + " (raw: " + data.byteLength + "bytes)");
+                    
+                    // 相乗りデータの分解 [Byte0:Hz低, Byte1:Hz高, Byte2:Temp]
+                    if (data.byteLength >= 3) {
+                        let hz = data.getUint16(0, true);
+                        let temp = data.getUint8(2);
+                        
+                        document.getElementById('display_hz').textContent = hz;
+                        document.getElementById('display_temp').textContent = temp;
+                        
+                        // ログが多すぎると重くなるので、受信確認のみ
+                        if(Math.random() > 0.9) addLog("Update - Hz: " + hz + " T: " + temp);
+                    } else {
+                        // 100だけ送られてきた場合のフォールバック
+                        let val = data.byteLength >= 2 ? data.getUint16(0, true) : data.getUint8(0);
+                        document.getElementById('display_hz').textContent = val;
+                    }
                 };
 
-                addLog("MONITORING START");
+                addLog("MONITORING START: Running...");
                 document.getElementById('connectBtn').style.background = "#004098";
                 document.getElementById('connectBtn').textContent = "CONNECTED";
 
