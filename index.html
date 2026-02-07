@@ -3,38 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>iPad BLE DUAL MONITOR</title>
+    <title>iPad BLE DEBUG</title>
     <style>
-        body { background: #000; color: #00FF00; font-family: 'Courier New', Courier, monospace; padding: 20px; }
-        .box { border: 2px solid #333; padding: 20px; margin-bottom: 15px; border-radius: 12px; background: #111; text-align: center; }
-        .label { color: #888; font-size: 14px; margin-bottom: 5px; text-transform: uppercase; }
-        .val { font-size: 48px; font-weight: bold; color: #fff; }
-        .unit { font-size: 18px; color: #888; margin-left: 5px; }
-        button { width: 100%; padding: 20px; font-size: 20px; font-weight: bold; background: #004098; color: #fff; border: none; border-radius: 10px; cursor: pointer; transition: 0.3s; }
-        button:active { background: #002b66; transform: scale(0.98); }
-        #log { font-size: 12px; color: #666; height: 150px; overflow-y: auto; background: #050505; padding: 10px; margin-top: 20px; border-top: 1px solid #222; }
+        body { background: #000; color: #00FF00; font-family: monospace; padding: 20px; font-size: 14px; }
+        .box { border: 1px solid #444; padding: 15px; margin-bottom: 10px; border-radius: 8px; background: #111; }
+        .label { color: #888; font-size: 11px; }
+        .val { font-size: 36px; font-weight: bold; color: #fff; }
+        button { width: 100%; padding: 20px; font-size: 18px; font-weight: bold; background: #E4002B; color: #fff; border: none; border-radius: 10px; cursor: pointer; }
+        #log { font-size: 10px; color: #aaa; height: 250px; overflow-y: auto; background: #050505; padding: 10px; margin-top: 15px; border: 1px solid #333; }
     </style>
 </head>
 <body>
 
     <div class="box">
-        <div class="label">Rotation Frequency</div>
-        <div><span id="raw_rpm" class="val">---</span><span class="unit">Hz</span></div>
+        <div class="label">RPM RAW (Hz)</div>
+        <div id="raw_rpm" class="val">WAITING...</div>
     </div>
 
-    <div class="box">
-        <div class="label">Engine Temperature</div>
-        <div><span id="raw_temp" class="val">---</span><span class="unit">°C</span></div>
-    </div>
+    <button id="connectBtn">CONNECT START</button>
 
-    <button id="connectBtn">CONNECT TO ESP32</button>
-
-    <div id="log">--- System Status ---<br></div>
+    <div id="log">--- System Debug Log ---<br></div>
 
     <script>
-const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c3319141";
-const RPM_UUID     = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb631";
-const TEMP_UUID    = "ac98b174-608a-41f2-aa83-7e55432fafa1";
+        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const PULSE_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
 
         function addLog(msg) {
             const log = document.getElementById('log');
@@ -43,52 +35,49 @@ const TEMP_UUID    = "ac98b174-608a-41f2-aa83-7e55432fafa1";
         }
 
         document.getElementById('connectBtn').onclick = async () => {
-            addLog("Searching for ESP32...");
+            addLog("Step 1: Scanning...");
             try {
                 const device = await navigator.bluetooth.requestDevice({
                     filters: [{ services: [SERVICE_UUID] }]
                 });
 
-                addLog("Connecting...");
+                addLog("Step 2: Connecting...");
                 const server = await device.gatt.connect();
                 
-                // iPadの安定待ち
+                addLog("Step 3: Stability Wait (2s)...");
                 await new Promise(r => setTimeout(r, 2000));
 
+                addLog("Step 4: Getting Service...");
                 const service = await server.getPrimaryService(SERVICE_UUID);
-                addLog("Service linked.");
+                const pC = await service.getCharacteristic(PULSE_UUID);
 
-                // --- RPM (Hz) 設定 ---
-                const rpmChar = await service.getCharacteristic(RPM_UUID);
-                await rpmChar.startNotifications();
-                rpmChar.oncharacteristicvaluechanged = (e) => {
+                // --- 読み取りテスト ---
+                addLog("Step 5: Direct Read Test...");
+                const initVal = await pC.readValue();
+                addLog("READ SUCCESS: " + initVal.getUint8(0));
+                document.getElementById('raw_rpm').textContent = initVal.byteLength >= 2 ? initVal.getUint16(0, true) : initVal.getUint8(0);
+
+                // --- 通知開始 ---
+                addLog("Step 6: Starting Notifications...");
+                await new Promise(r => setTimeout(r, 1000));
+                await pC.startNotifications();
+                
+                pC.oncharacteristicvaluechanged = (e) => {
                     const data = e.target.value;
                     let val = data.byteLength >= 2 ? data.getUint16(0, true) : data.getUint8(0);
                     document.getElementById('raw_rpm').textContent = val;
+                    addLog("RCVD: " + val + " (raw: " + data.byteLength + "bytes)");
                 };
-                addLog("RPM Monitoring: OK");
 
-                // iPadのために少し間隔を空ける
-                await new Promise(r => setTimeout(r, 1000));
-
-                // --- Temperature 設定 ---
-                const tempChar = await service.getCharacteristic(TEMP_UUID);
-                await tempChar.startNotifications();
-                tempChar.oncharacteristicvaluechanged = (e) => {
-                    const val = e.target.value.getUint8(0);
-                    document.getElementById('raw_temp').textContent = val;
-                };
-                addLog("Temp Monitoring: OK");
-
-                document.getElementById('connectBtn').textContent = "SYSTEM ACTIVE";
-                document.getElementById('connectBtn').style.background = "#28a745";
+                addLog("MONITORING START");
+                document.getElementById('connectBtn').style.background = "#004098";
+                document.getElementById('connectBtn').textContent = "CONNECTED";
 
             } catch (e) {
-                addLog("ERROR: " + e.message);
+                addLog("FATAL ERROR: " + e.message);
                 console.error(e);
             }
         };
     </script>
 </body>
 </html>
-
