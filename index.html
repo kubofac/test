@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>kfac DUAL MONITOR</title>
+    <title>kfac Android-to-iPad</title>
     <style>
         body { background: #000; color: #00FF00; font-family: monospace; padding: 20px; text-align: center; }
         .box-container { display: flex; justify-content: space-around; margin-bottom: 20px; }
@@ -11,83 +11,69 @@
         .label { color: #888; font-size: 14px; margin-bottom: 10px; }
         .val { font-size: 60px; font-weight: bold; color: #fff; display: block; }
         .unit { font-size: 18px; color: #00FF00; }
-        button { width: 100%; padding: 25px; font-size: 20px; font-weight: bold; background: #E4002B; color: #fff; border: none; border-radius: 15px; cursor: pointer; box-shadow: 0 4px #99001d; }
-        button:active { transform: translateY(2px); box-shadow: 0 2px #99001d; }
-        #log { font-size: 12px; color: #aaa; height: 150px; overflow-y: auto; background: #050505; padding: 10px; margin-top: 20px; border: 1px solid #333; text-align: left; }
+        button { width: 100%; padding: 25px; font-size: 20px; font-weight: bold; background: #E4002B; color: #fff; border: none; border-radius: 15px; cursor: pointer; }
+        #log { font-size: 11px; color: #aaa; height: 120px; overflow-y: auto; background: #050505; padding: 10px; margin-top: 20px; border: 1px solid #333; text-align: left; }
     </style>
 </head>
 <body>
 
     <div class="box-container">
         <div class="box">
-            <div class="label">ROTATION</div>
-            <span id="display_hz" class="val">0</span>
-            <span class="unit">Hz</span>
+            <div class="label">Hz</div>
+            <span id="hz" class="val">0</span>
         </div>
         <div class="box">
             <div class="label">TEMP</div>
-            <span id="display_temp" class="val">0</span>
+            <span id="temp" class="val">0</span>
             <span class="unit">°C</span>
         </div>
     </div>
 
-    <button id="connectBtn">CONNECT START</button>
-
-    <div id="log">--- System Debug Log ---<br></div>
+    <button id="btn">CONNECT START</button>
+    <div id="log">--- Debug Log ---<br></div>
 
     <script>
-        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-        const PULSE_UUID   = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
+        const S_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const C_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
 
-        function addLog(msg) {
-            const log = document.getElementById('log');
-            log.innerHTML += `> ${msg}<br>`;
-            log.scrollTop = log.scrollHeight;
+        function addLog(m) {
+            const l = document.getElementById('log');
+            l.innerHTML += `> ${m}<br>`;
+            l.scrollTop = l.scrollHeight;
         }
 
-        document.getElementById('connectBtn').onclick = async () => {
+        document.getElementById('btn').onclick = async () => {
             try {
-                addLog("Scanning...");
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [SERVICE_UUID] }]
-                });
-
-                addLog("Connecting...");
-                const server = await device.gatt.connect();
+                addLog("Scanning for kfac-final...");
+                const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [S_UUID] }] });
+                const server = await dev.gatt.connect();
+                addLog("Connected. Loading...");
                 
-                addLog("Waiting for stability...");
                 await new Promise(r => setTimeout(r, 1500));
+                const service = await server.getPrimaryService(S_UUID);
+                const char = await service.getCharacteristic(C_UUID);
 
-                const service = await server.getPrimaryService(SERVICE_UUID);
-                const pC = await service.getCharacteristic(PULSE_UUID);
+                await char.startNotifications();
+                addLog("Monitoring...");
 
-                addLog("Enabling Notifications...");
-                await pC.startNotifications();
-                
-                pC.oncharacteristicvaluechanged = (e) => {
+                char.oncharacteristicvaluechanged = (e) => {
                     const data = e.target.value;
-                    
-                    // 【重要】データの長さをチェックして分解
                     if (data.byteLength >= 3) {
-                        // ESP32から: [Byte0(L), Byte1(H), Byte2(Temp)] で届く
-                        let hz = data.getUint16(0, true); // 小さい順(Little Endian)で2バイト読み取り
-                        let temp = data.getUint8(2);      // 3番目のバイトを読み取り
+                        // 1バイトずつ確実に取り出す（エンディアン問題を無視）
+                        let low = data.getUint8(0);
+                        let high = data.getUint8(1);
+                        let t = data.getUint8(2);
                         
-                        document.getElementById('display_hz').textContent = hz;
-                        document.getElementById('display_temp').textContent = temp;
-                    } else if (data.byteLength === 2) {
-                        // もし2バイト（100のみ）しか来ていない場合の処理
-                        let hz = data.getUint16(0, true);
-                        document.getElementById('display_hz').textContent = hz;
+                        // Hzを合成
+                        let hzVal = (high << 8) | low;
+                        
+                        document.getElementById('hz').textContent = hzVal;
+                        document.getElementById('temp').textContent = t;
                     }
                 };
-
-                addLog("MONITORING START");
-                document.getElementById('connectBtn').innerText = "CONNECTED";
-                document.getElementById('connectBtn').style.background = "#004098";
-
+                document.getElementById('btn').textContent = "CONNECTED";
             } catch (e) {
-                addLog("ERROR: " + e.message);
+                addLog("Error: " + e.message);
             }
         };
     </script>
