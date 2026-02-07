@@ -1,61 +1,44 @@
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLE2902.h>
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>kfac v2 Test</title>
+    <style>
+        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
+        .val { font-size: 40px; color: #fff; margin-bottom: 20px; }
+        button { padding: 20px; width: 100%; font-size: 20px; }
+    </style>
+</head>
+<body>
+    <div>RPM (Hz): <span id="rpm" class="val">Waiting...</span></div>
+    <div>TEMP (Raw): <span id="temp" class="val">Waiting...</span></div>
+    <button id="btn">Connect (kfac-v2)</button>
 
-#define THERMISTOR_PIN 4
-BLECharacteristic* pC1 = NULL;
-bool deviceConnected = false;
+    <script>
+        const S_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const C_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
 
-// UUIDは100が出た時と同じものを使います
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630"
+        document.getElementById('btn').onclick = async () => {
+            try {
+                const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [S_UUID] }] });
+                const server = await dev.gatt.connect();
+                await new Promise(r => setTimeout(r, 2000));
+                const service = await server.getPrimaryService(S_UUID);
+                const char = await service.getCharacteristic(C_UUID);
 
-class MyCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* p) { deviceConnected = true; }
-    void onDisconnect(BLEServer* p) { deviceConnected = false; }
-};
-
-void setup() {
-  Serial.begin(9600);
-  pinMode(THERMISTOR_PIN, INPUT);
-
-  // 名前を「v2」に変えてiPadの記憶をリセットさせます
-  BLEDevice::init("kfac-v2"); 
-  BLEServer *pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyCallbacks());
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-
-  // 入り口（Characteristic）は1つだけに絞ります
-  pC1 = pService->createCharacteristic(CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ);
-  pC1->addDescriptor(new BLE2902());
-
-  pService->start();
-  BLEAdvertising *pAdv = BLEDevice::getAdvertising();
-  pAdv->addServiceUUID(SERVICE_UUID);
-  pAdv->setScanResponse(true);
-  pAdv->setMinPreferred(0x06);
-  pAdv->setMaxPreferred(0x12);
-  BLEDevice::startAdvertising();
-}
-
-void loop() {
-  static unsigned long last = 0;
-  if (deviceConnected && (millis() - last > 500)) {
-    // データパック作成 [RPM低, RPM高, 温度] の3バイト
-    uint16_t hz = 100;
-    int rawTemp = analogRead(THERMISTOR_PIN);
-    uint8_t t = (uint8_t)(rawTemp / 16); // 簡易的な温度代わり
-
-    uint8_t data[3];
-    data[0] = hz & 0xFF;
-    data[1] = (hz >> 8) & 0xFF;
-    data[2] = t;
-
-    pC1->setValue(data, 3);
-    pC1->notify();
-
-    Serial.printf("Sent Hz: %d, Raw/16: %d\n", hz, t);
-    last = millis();
-  }
-  if (!deviceConnected) { delay(100); BLEDevice::startAdvertising(); }
-}
+                await char.startNotifications();
+                char.oncharacteristicvaluechanged = (e) => {
+                    const data = e.target.value;
+                    // 送られてきた3バイトを分解
+                    let hz = data.getUint16(0, true);
+                    let temp = data.getUint8(2);
+                    
+                    document.getElementById('rpm').innerText = hz;
+                    document.getElementById('temp').innerText = temp;
+                };
+                document.getElementById('btn').innerText = "Connected!";
+            } catch (e) { alert(e.message); }
+        };
+    </script>
+</body>
+</html>
