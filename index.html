@@ -2,54 +2,54 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DEBUG kfac</title>
+    <title>FINAL CHECK kfac</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; text-align: center; }
-        .val { font-size: 50px; color: #fff; font-weight: bold; }
+        .val { font-size: 60px; color: #fff; font-weight: bold; display: block; }
         button { width: 100%; padding: 20px; background: #E4002B; color: #fff; border-radius: 10px; border: none; font-size: 18px; }
-        #log { font-size: 12px; color: #aaa; height: 200px; overflow-y: auto; border: 1px solid #333; margin-top: 10px; text-align: left; padding: 5px; }
+        #log { font-size: 11px; color: #aaa; height: 150px; overflow-y: auto; border: 1px solid #333; margin-top: 10px; text-align: left; padding: 5px; }
     </style>
 </head>
 <body>
-    <div style="border:1px solid #444; margin-bottom:10px; padding:10px;">
-        Hz: <span id="hz" class="val">0</span><br>
-        Temp: <span id="temp" class="val">0</span>
+    <div style="border:1px solid #444; margin:10px; padding:20px;">
+        Hz: <span id="hz_val" class="val">0</span>
+        Temp: <span id="temp_val" class="val">0</span>
     </div>
-    <button id="go">CONNECT ULTIMATE</button>
+    <button id="connect">CONNECT</button>
     <div id="log">Logs:<br></div>
 
     <script>
         const S_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
         const C_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
-        function log(m) { const l = document.getElementById('log'); l.innerHTML += `> ${m}<br>`; l.scrollTop = l.scrollHeight; }
+        function addLog(m) { const l = document.getElementById('log'); l.innerHTML += `> ${m}<br>`; l.scrollTop = l.scrollHeight; }
 
-        document.getElementById('go').onclick = async () => {
+        document.getElementById('connect').onclick = async () => {
             try {
-                log("Scanning...");
+                addLog("Scanning for kfac-ultimate...");
                 const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [S_UUID] }] });
                 const server = await dev.gatt.connect();
-                log("Connected.");
+                addLog("Connected! Waiting 2sec...");
                 
+                await new Promise(r => setTimeout(r, 2000));
                 const service = await server.getPrimaryService(S_UUID);
                 const char = await service.getCharacteristic(C_UUID);
 
-                char.oncharacteristicvaluechanged = (e) => {
-                    const d = e.target.value;
-                    // 生のバイトデータをそのままログに出す
-                    let b0 = d.getUint8(0);
-                    let b1 = d.getUint8(1);
-                    let b2 = d.getUint8(2);
-                    log(`DATA RCVD: [${b0}, ${b1}, ${b2}]`);
+                // 【重要】書き方を「addEventListener」に変更して、確実に拾う
+                char.addEventListener('characteristicvaluechanged', (event) => {
+                    const d = event.target.value;
+                    addLog(`RAW: [${d.getUint8(0)}, ${d.getUint8(1)}, ${d.getUint8(2)}]`);
 
-                    let hzVal = (b1 << 8) | b0;
-                    document.getElementById('hz').innerText = hzVal;
-                    document.getElementById('temp').innerText = b2;
-                };
+                    let hz = d.getUint8(0) | (d.getUint8(1) << 8);
+                    let temp = d.getUint8(2);
+
+                    document.getElementById('hz_val').innerText = hz;
+                    document.getElementById('temp_val').innerText = temp;
+                });
 
                 await char.startNotifications();
-                log("Notifications Started.");
-            } catch (e) { log("ERR: " + e); }
+                addLog("NOTIFY START - Waiting for data...");
+
+            } catch (e) { addLog("ERR: " + e); }
         };
     </script>
 </body>
