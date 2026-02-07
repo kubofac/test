@@ -1,55 +1,61 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>kfac Test</title>
-    <style>
-        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-        .val { font-size: 40px; color: #fff; margin-bottom: 20px; }
-        button { padding: 20px; width: 100%; font-size: 20px; }
-    </style>
-</head>
-<body>
-    <div>RPM (Hz): <span id="rpm" class="val">Waiting...</span></div>
-    <div>TEMP (Raw): <span id="temp" class="val">Waiting...</span></div>
-    <button id="btn">Connect</button>
-    <div id="log" style="font-size:10px; color:#888; margin-top:20px;"></div>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
 
-    <script>
-        const S_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-        const C1_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
-        const C2_UUID = "ac98b174-608a-41f2-aa83-7e55432fafa9";
+#define THERMISTOR_PIN 4
+BLECharacteristic* pC1 = NULL;
+bool deviceConnected = false;
 
-        document.getElementById('btn').onclick = async () => {
-            try {
-                const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [S_UUID] }] });
-                const server = await dev.gatt.connect();
-                await new Promise(r => setTimeout(r, 2000)); // iPad安定待ち
-                const service = await server.getPrimaryService(S_UUID);
+// UUIDは100が出た時と同じものを使います
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630"
 
-                // RPM開始
-                const char1 = await service.getCharacteristic(C1_UUID);
-                await char1.startNotifications();
-                char1.oncharacteristicvaluechanged = (e) => {
-                    let v = e.target.value.getUint16(0, true);
-                    document.getElementById('rpm').innerText = v;
-                };
+class MyCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* p) { deviceConnected = true; }
+    void onDisconnect(BLEServer* p) { deviceConnected = false; }
+};
 
-                await new Promise(r => setTimeout(r, 1000)); // 連続設定を避ける
+void setup() {
+  Serial.begin(9600);
+  pinMode(THERMISTOR_PIN, INPUT);
 
-                // TEMP開始
-                const char2 = await service.getCharacteristic(C2_UUID);
-                await char2.startNotifications();
-                char2.oncharacteristicvaluechanged = (e) => {
-                    let v = e.target.value.getUint8(0);
-                    document.getElementById('temp').innerText = v;
-                };
+  // 名前を「v2」に変えてiPadの記憶をリセットさせます
+  BLEDevice::init("kfac-v2"); 
+  BLEServer *pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyCallbacks());
+  BLEService *pService = pServer->createService(SERVICE_UUID);
 
-                document.getElementById('btn').innerText = "Connected";
-            } catch (e) {
-                document.getElementById('log').innerText += e.message + "\n";
-            }
-        };
-    </script>
-</body>
-</html>
+  // 入り口（Characteristic）は1つだけに絞ります
+  pC1 = pService->createCharacteristic(CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ);
+  pC1->addDescriptor(new BLE2902());
+
+  pService->start();
+  BLEAdvertising *pAdv = BLEDevice::getAdvertising();
+  pAdv->addServiceUUID(SERVICE_UUID);
+  pAdv->setScanResponse(true);
+  pAdv->setMinPreferred(0x06);
+  pAdv->setMaxPreferred(0x12);
+  BLEDevice::startAdvertising();
+}
+
+void loop() {
+  static unsigned long last = 0;
+  if (deviceConnected && (millis() - last > 500)) {
+    // データパック作成 [RPM低, RPM高, 温度] の3バイト
+    uint16_t hz = 100;
+    int rawTemp = analogRead(THERMISTOR_PIN);
+    uint8_t t = (uint8_t)(rawTemp / 16); // 簡易的な温度代わり
+
+    uint8_t data[3];
+    data[0] = hz & 0xFF;
+    data[1] = (hz >> 8) & 0xFF;
+    data[2] = t;
+
+    pC1->setValue(data, 3);
+    pC1->notify();
+
+    Serial.printf("Sent Hz: %d, Raw/16: %d\n", hz, t);
+    last = millis();
+  }
+  if (!deviceConnected) { delay(100); BLEDevice::startAdvertising(); }
+}
