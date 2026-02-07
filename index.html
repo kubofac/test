@@ -1,44 +1,50 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>kfac FIX Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>kfac Back to Basic</title>
     <style>
-        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; text-align: center; }
-        .box { border: 1px solid #333; padding: 20px; margin: 10px; border-radius: 10px; }
-        .val { font-size: 50px; color: #fff; }
-        button { padding: 20px; width: 100%; font-size: 20px; background: #004098; color: #fff; border: none; border-radius: 10px; }
+        body { background: #000; color: #0f0; font-family: sans-serif; text-align: center; padding-top: 50px; }
+        #rpm { font-size: 80px; color: #fff; font-weight: bold; }
+        button { padding: 20px 40px; font-size: 20px; cursor: pointer; background: #004098; color: white; border: none; border-radius: 10px; }
     </style>
 </head>
 <body>
-    <div class="box">RPM: <span id="rpm" class="val">---</span> Hz</div>
-    <div class="box">TEMP Raw: <span id="temp" class="val">---</span></div>
-    <button id="btn">CONNECT (kfac-FIX)</button>
+
+    <div style="font-size: 20px; color: #888;">RPM (Hz)</div>
+    <div id="rpm">WAITING...</div>
+    <br><br>
+    <button id="connectBtn">CONNECT TO kfac</button>
 
     <script>
-        const S_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-        const C_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
+        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const CHARACTERISTIC_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
 
-        document.getElementById('btn').onclick = async () => {
+        document.getElementById('connectBtn').onclick = async () => {
             try {
-                const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [S_UUID] }] });
-                const server = await dev.gatt.connect();
-                await new Promise(r => setTimeout(r, 2000)); // 接続後の安定待ち
-                const service = await server.getPrimaryService(S_UUID);
-                const char = await service.getCharacteristic(C_UUID);
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [SERVICE_UUID] }]
+                });
 
-                await char.startNotifications();
-                char.oncharacteristicvaluechanged = (e) => {
-                    const data = e.target.value;
-                    // 3バイトの塊から分解して取り出す
-                    let hz = data.getUint16(0, true); // 最初の2バイト
-                    let t = data.getUint8(2);         // 3バイト目
-                    
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+                await characteristic.startNotifications();
+                
+                characteristic.oncharacteristicvaluechanged = (event) => {
+                    const value = event.target.value;
+                    // 2バイト（16bit）として読み取り
+                    const hz = value.getUint16(0, true);
                     document.getElementById('rpm').innerText = hz;
-                    document.getElementById('temp').innerText = t;
                 };
-                document.getElementById('btn').innerText = "CONNECTED";
-            } catch (e) { alert("Error: " + e.message); }
+
+                document.getElementById('connectBtn').innerText = "CONNECTED";
+
+            } catch (error) {
+                alert("Error: " + error);
+            }
         };
     </script>
 </body>
