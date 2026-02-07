@@ -3,38 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>iPad BLE FINAL TEST</title>
+    <title>iPad BLE DEBUG</title>
     <style>
-        body { background: #000; color: #00FF00; font-family: monospace; padding: 20px; }
+        body { background: #000; color: #00FF00; font-family: monospace; padding: 20px; font-size: 14px; }
         .box { border: 1px solid #444; padding: 15px; margin-bottom: 10px; border-radius: 8px; background: #111; }
-        .label { color: #888; font-size: 12px; }
-        .val { font-size: 32px; font-weight: bold; }
-        button { width: 100%; padding: 20px; font-size: 18px; font-weight: bold; background: #E4002B; color: #fff; border: none; border-radius: 10px; margin-top: 10px; }
-        #log { font-size: 11px; color: #aaa; height: 200px; overflow-y: auto; background: #050505; padding: 10px; margin-top: 20px; border: 1px solid #222; }
+        .label { color: #888; font-size: 11px; }
+        .val { font-size: 36px; font-weight: bold; color: #fff; }
+        button { width: 100%; padding: 20px; font-size: 18px; font-weight: bold; background: #E4002B; color: #fff; border: none; border-radius: 10px; cursor: pointer; }
+        #log { font-size: 10px; color: #aaa; height: 250px; overflow-y: auto; background: #050505; padding: 10px; margin-top: 15px; border: 1px solid #333; }
     </style>
 </head>
 <body>
 
-    <h3>iPad BLE FINAL TEST</h3>
-
     <div class="box">
-        <div class="label">RPM DATA (Hz)</div>
+        <div class="label">RPM RAW (Hz)</div>
         <div id="raw_rpm" class="val">WAITING...</div>
     </div>
 
-    <div class="box">
-        <div class="label">TEMP DATA</div>
-        <div id="raw_temp" class="val">WAITING...</div>
-    </div>
+    <button id="connectBtn">CONNECT START</button>
 
-    <button id="connectBtn">iPad CONNECT START</button>
-
-    <div id="log">--- System Log ---<br></div>
+    <div id="log">--- System Debug Log ---<br></div>
 
     <script>
         const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
         const PULSE_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
-        const TEMP_UUID = "ac98b174-608a-41f2-aa83-7e55432fafa9";
 
         function addLog(msg) {
             const log = document.getElementById('log');
@@ -43,51 +35,47 @@
         }
 
         document.getElementById('connectBtn').onclick = async () => {
-            addLog("Step 1: Requesting device...");
+            addLog("Step 1: Scanning...");
             try {
                 const device = await navigator.bluetooth.requestDevice({
                     filters: [{ services: [SERVICE_UUID] }]
                 });
 
-                addLog("Step 2: Connecting to GATT...");
+                addLog("Step 2: Connecting...");
                 const server = await device.gatt.connect();
                 
-                addLog("Step 3: Waiting 2 seconds for iPad stability...");
+                addLog("Step 3: Stability Wait (2s)...");
                 await new Promise(r => setTimeout(r, 2000));
 
                 addLog("Step 4: Getting Service...");
                 const service = await server.getPrimaryService(SERVICE_UUID);
-
-                // --- RPM通知 ---
-                addLog("Step 5: Setup RPM...");
                 const pC = await service.getCharacteristic(PULSE_UUID);
-                await new Promise(r => setTimeout(r, 1000)); // iPadに余裕を与える
+
+                // --- 読み取りテスト ---
+                addLog("Step 5: Direct Read Test...");
+                const initVal = await pC.readValue();
+                addLog("READ SUCCESS: " + initVal.getUint8(0));
+                document.getElementById('raw_rpm').textContent = initVal.byteLength >= 2 ? initVal.getUint16(0, true) : initVal.getUint8(0);
+
+                // --- 通知開始 ---
+                addLog("Step 6: Starting Notifications...");
+                await new Promise(r => setTimeout(r, 1000));
                 await pC.startNotifications();
+                
                 pC.oncharacteristicvaluechanged = (e) => {
                     const data = e.target.value;
                     let val = data.byteLength >= 2 ? data.getUint16(0, true) : data.getUint8(0);
                     document.getElementById('raw_rpm').textContent = val;
+                    addLog("RCVD: " + val + " (raw: " + data.byteLength + "bytes)");
                 };
 
-                // --- TEMP通知 ---
-                addLog("Step 6: Setup TEMP...");
-                await new Promise(r => setTimeout(r, 1500)); // 間隔を空ける
-                const tC = await service.getCharacteristic(TEMP_UUID);
-                await tC.startNotifications();
-                tC.oncharacteristicvaluechanged = (e) => {
-                    const val = e.target.value.getUint8(0);
-                    document.getElementById('raw_temp').textContent = val;
-                };
-
-                addLog("COMPLETE: Watching data...");
+                addLog("MONITORING START");
                 document.getElementById('connectBtn').style.background = "#004098";
                 document.getElementById('connectBtn').textContent = "CONNECTED";
 
             } catch (e) {
-                addLog("ERROR: " + e.message);
-                if (e.message.includes("rejected")) {
-                    addLog("!! iPadが拒否しました。iPadのBluetooth設定でデバイス登録を解除して、アプリを再起動してください。");
-                }
+                addLog("FATAL ERROR: " + e.message);
+                console.error(e);
             }
         };
     </script>
