@@ -1,81 +1,53 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>iPad BLE DEBUG</title>
+    <title>kfac Test</title>
     <style>
-        body { background: #000; color: #00FF00; font-family: monospace; padding: 20px; font-size: 14px; }
-        .box { border: 1px solid #444; padding: 15px; margin-bottom: 10px; border-radius: 8px; background: #111; }
-        .label { color: #888; font-size: 11px; }
-        .val { font-size: 36px; font-weight: bold; color: #fff; }
-        button { width: 100%; padding: 20px; font-size: 18px; font-weight: bold; background: #E4002B; color: #fff; border: none; border-radius: 10px; cursor: pointer; }
-        #log { font-size: 10px; color: #aaa; height: 250px; overflow-y: auto; background: #050505; padding: 10px; margin-top: 15px; border: 1px solid #333; }
+        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
+        .val { font-size: 40px; color: #fff; margin-bottom: 20px; }
+        button { padding: 20px; width: 100%; font-size: 20px; }
     </style>
 </head>
 <body>
-
-    <div class="box">
-        <div class="label">RPM RAW (Hz)</div>
-        <div id="raw_rpm" class="val">WAITING...</div>
-    </div>
-
-    <button id="connectBtn">CONNECT START</button>
-
-    <div id="log">--- System Debug Log ---<br></div>
+    <div>RPM (Hz): <span id="rpm" class="val">Waiting...</span></div>
+    <div>TEMP (Raw): <span id="temp" class="val">Waiting...</span></div>
+    <button id="btn">Connect</button>
+    <div id="log" style="font-size:10px; color:#888; margin-top:20px;"></div>
 
     <script>
-        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-        const PULSE_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
+        const S_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const C1_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
+        const C2_UUID = "ac98b174-608a-41f2-aa83-7e55432fafa9";
 
-        function addLog(msg) {
-            const log = document.getElementById('log');
-            log.innerHTML += `> ${msg}<br>`;
-            log.scrollTop = log.scrollHeight;
-        }
-
-        document.getElementById('connectBtn').onclick = async () => {
-            addLog("Step 1: Scanning...");
+        document.getElementById('btn').onclick = async () => {
             try {
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [SERVICE_UUID] }]
-                });
+                const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [S_UUID] }] });
+                const server = await dev.gatt.connect();
+                await new Promise(r => setTimeout(r, 2000)); // iPad安定待ち
+                const service = await server.getPrimaryService(S_UUID);
 
-                addLog("Step 2: Connecting...");
-                const server = await device.gatt.connect();
-                
-                addLog("Step 3: Stability Wait (2s)...");
-                await new Promise(r => setTimeout(r, 2000));
-
-                addLog("Step 4: Getting Service...");
-                const service = await server.getPrimaryService(SERVICE_UUID);
-                const pC = await service.getCharacteristic(PULSE_UUID);
-
-                // --- 読み取りテスト ---
-                addLog("Step 5: Direct Read Test...");
-                const initVal = await pC.readValue();
-                addLog("READ SUCCESS: " + initVal.getUint8(0));
-                document.getElementById('raw_rpm').textContent = initVal.byteLength >= 2 ? initVal.getUint16(0, true) : initVal.getUint8(0);
-
-                // --- 通知開始 ---
-                addLog("Step 6: Starting Notifications...");
-                await new Promise(r => setTimeout(r, 1000));
-                await pC.startNotifications();
-                
-                pC.oncharacteristicvaluechanged = (e) => {
-                    const data = e.target.value;
-                    let val = data.byteLength >= 2 ? data.getUint16(0, true) : data.getUint8(0);
-                    document.getElementById('raw_rpm').textContent = val;
-                    addLog("RCVD: " + val + " (raw: " + data.byteLength + "bytes)");
+                // RPM開始
+                const char1 = await service.getCharacteristic(C1_UUID);
+                await char1.startNotifications();
+                char1.oncharacteristicvaluechanged = (e) => {
+                    let v = e.target.value.getUint16(0, true);
+                    document.getElementById('rpm').innerText = v;
                 };
 
-                addLog("MONITORING START");
-                document.getElementById('connectBtn').style.background = "#004098";
-                document.getElementById('connectBtn').textContent = "CONNECTED";
+                await new Promise(r => setTimeout(r, 1000)); // 連続設定を避ける
 
+                // TEMP開始
+                const char2 = await service.getCharacteristic(C2_UUID);
+                await char2.startNotifications();
+                char2.oncharacteristicvaluechanged = (e) => {
+                    let v = e.target.value.getUint8(0);
+                    document.getElementById('temp').innerText = v;
+                };
+
+                document.getElementById('btn').innerText = "Connected";
             } catch (e) {
-                addLog("FATAL ERROR: " + e.message);
-                console.error(e);
+                document.getElementById('log').innerText += e.message + "\n";
             }
         };
     </script>
