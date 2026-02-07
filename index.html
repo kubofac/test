@@ -1,51 +1,74 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>kfac iPad Fix</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>kfac DUAL FIX</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; text-align: center; padding: 20px; }
         .box { border: 2px solid #333; padding: 20px; margin: 10px; border-radius: 15px; background: #111; }
-        .val { font-size: 60px; color: #fff; display: block; }
+        .val { font-size: 60px; color: #fff; display: block; font-weight: bold; }
         button { width: 100%; padding: 25px; font-size: 20px; background: #E4002B; color: #fff; border: none; border-radius: 10px; }
-        #log { font-size: 11px; color: #888; text-align: left; height: 100px; overflow: auto; }
+        #log { font-size: 11px; color: #888; text-align: left; height: 120px; overflow: auto; margin-top: 20px; border: 1px solid #333; padding: 5px; }
     </style>
 </head>
 <body>
-    <div class="box">Hz: <span id="hz" class="val">0</span></div>
-    <div class="box">Temp: <span id="temp" class="val">0</span>°C</div>
-    <button id="btn">CONNECT (v2)</button>
+    <div class="box">RPM: <span id="hz" class="val">0</span> Hz</div>
+    <div class="box">TEMP: <span id="temp" class="val">0</span> °C</div>
+    <button id="btn">CONNECT START</button>
     <div id="log">--- Debug Log ---<br></div>
 
     <script>
         const S_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
         const C_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
 
+        function addLog(m) {
+            const l = document.getElementById('log');
+            l.innerHTML += `> ${m}<br>`;
+            l.scrollTop = l.scrollHeight;
+        }
+
         document.getElementById('btn').onclick = async () => {
             try {
-                const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [S_UUID] }] });
+                addLog("Scanning...");
+                const dev = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [S_UUID] }]
+                });
+
+                addLog("Connecting...");
                 const server = await dev.gatt.connect();
-                await new Promise(r => setTimeout(r, 2000)); // iPadの安定待ちを長く
+                await new Promise(r => setTimeout(r, 2000));
                 
                 const service = await server.getPrimaryService(S_UUID);
                 const char = await service.getCharacteristic(C_UUID);
 
-                // 通知開始の前に一度だけ直接読み取る（これでパイプを掃除）
-                const firstVal = await char.readValue();
-                document.getElementById('log').innerHTML += "Initial Read Done<br>";
+                // 通知の受け取り設定
+                char.oncharacteristicvaluechanged = (event) => {
+                    const data = event.target.value;
+                    addLog("Received bytes: " + data.byteLength);
 
-                await char.startNotifications();
-                char.oncharacteristicvaluechanged = (e) => {
-                    const d = e.target.value;
-                    if (d.byteLength >= 3) {
-                        let h = d.getUint16(0, true);
-                        let t = d.getUint8(2);
-                        document.getElementById('hz').innerText = h;
-                        document.getElementById('temp').innerText = t;
+                    if (data.byteLength >= 3) {
+                        // 1バイトずつ確実に取り出す
+                        const hLow = data.getUint8(0);
+                        const hHigh = data.getUint8(1);
+                        const tVal = data.getUint8(2);
+
+                        const finalHz = (hHigh << 8) | hLow;
+                        
+                        document.getElementById('hz').innerText = finalHz;
+                        document.getElementById('temp').innerText = tVal;
                     }
                 };
+
+                addLog("Starting Notifications...");
+                await char.startNotifications();
+                
                 document.getElementById('btn').innerText = "CONNECTED";
-            } catch (e) { alert(e.message); }
+                document.getElementById('btn').style.background = "#004098";
+
+            } catch (e) {
+                addLog("ERROR: " + e.message);
+            }
         };
     </script>
 </body>
