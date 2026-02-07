@@ -1,80 +1,51 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>kfac Android-to-iPad</title>
+    <title>kfac iPad Fix</title>
     <style>
-        body { background: #000; color: #00FF00; font-family: monospace; padding: 20px; text-align: center; }
-        .box-container { display: flex; justify-content: space-around; margin-bottom: 20px; }
-        .box { border: 2px solid #444; padding: 20px; border-radius: 15px; background: #111; width: 45%; }
-        .label { color: #888; font-size: 14px; margin-bottom: 10px; }
-        .val { font-size: 60px; font-weight: bold; color: #fff; display: block; }
-        .unit { font-size: 18px; color: #00FF00; }
-        button { width: 100%; padding: 25px; font-size: 20px; font-weight: bold; background: #E4002B; color: #fff; border: none; border-radius: 15px; cursor: pointer; }
-        #log { font-size: 11px; color: #aaa; height: 120px; overflow-y: auto; background: #050505; padding: 10px; margin-top: 20px; border: 1px solid #333; text-align: left; }
+        body { background: #000; color: #0f0; font-family: monospace; text-align: center; padding: 20px; }
+        .box { border: 2px solid #333; padding: 20px; margin: 10px; border-radius: 15px; background: #111; }
+        .val { font-size: 60px; color: #fff; display: block; }
+        button { width: 100%; padding: 25px; font-size: 20px; background: #E4002B; color: #fff; border: none; border-radius: 10px; }
+        #log { font-size: 11px; color: #888; text-align: left; height: 100px; overflow: auto; }
     </style>
 </head>
 <body>
-
-    <div class="box-container">
-        <div class="box">
-            <div class="label">Hz</div>
-            <span id="hz" class="val">0</span>
-        </div>
-        <div class="box">
-            <div class="label">TEMP</div>
-            <span id="temp" class="val">0</span>
-            <span class="unit">°C</span>
-        </div>
-    </div>
-
-    <button id="btn">CONNECT START</button>
+    <div class="box">Hz: <span id="hz" class="val">0</span></div>
+    <div class="box">Temp: <span id="temp" class="val">0</span>°C</div>
+    <button id="btn">CONNECT (v2)</button>
     <div id="log">--- Debug Log ---<br></div>
 
     <script>
         const S_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
         const C_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
 
-        function addLog(m) {
-            const l = document.getElementById('log');
-            l.innerHTML += `> ${m}<br>`;
-            l.scrollTop = l.scrollHeight;
-        }
-
         document.getElementById('btn').onclick = async () => {
             try {
-                addLog("Scanning for kfac-final...");
                 const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [S_UUID] }] });
                 const server = await dev.gatt.connect();
-                addLog("Connected. Loading...");
+                await new Promise(r => setTimeout(r, 2000)); // iPadの安定待ちを長く
                 
-                await new Promise(r => setTimeout(r, 1500));
                 const service = await server.getPrimaryService(S_UUID);
                 const char = await service.getCharacteristic(C_UUID);
 
-                await char.startNotifications();
-                addLog("Monitoring...");
+                // 通知開始の前に一度だけ直接読み取る（これでパイプを掃除）
+                const firstVal = await char.readValue();
+                document.getElementById('log').innerHTML += "Initial Read Done<br>";
 
+                await char.startNotifications();
                 char.oncharacteristicvaluechanged = (e) => {
-                    const data = e.target.value;
-                    if (data.byteLength >= 3) {
-                        // 1バイトずつ確実に取り出す（エンディアン問題を無視）
-                        let low = data.getUint8(0);
-                        let high = data.getUint8(1);
-                        let t = data.getUint8(2);
-                        
-                        // Hzを合成
-                        let hzVal = (high << 8) | low;
-                        
-                        document.getElementById('hz').textContent = hzVal;
-                        document.getElementById('temp').textContent = t;
+                    const d = e.target.value;
+                    if (d.byteLength >= 3) {
+                        let h = d.getUint16(0, true);
+                        let t = d.getUint8(2);
+                        document.getElementById('hz').innerText = h;
+                        document.getElementById('temp').innerText = t;
                     }
                 };
-                document.getElementById('btn').textContent = "CONNECTED";
-            } catch (e) {
-                addLog("Error: " + e.message);
-            }
+                document.getElementById('btn').innerText = "CONNECTED";
+            } catch (e) { alert(e.message); }
         };
     </script>
 </body>
