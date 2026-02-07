@@ -1,0 +1,53 @@
+// --- loop内のみ抜粋修正 ---
+
+void loop() {
+  unsigned long currentMillis = millis();
+  static unsigned long lastNotifyTime = 0;
+
+  // パルス入力チェック（whileで止めない）
+  if (flag) {
+    float hzz = (1000000.0 / (period));
+    uint16_t hz = round(hzz);
+    // ... RPM計算ロジック ...
+    flag = false; 
+  } else {
+    // 信号が一定時間（例：500ms）来なければ0にする処理をここに入れると親切
+  }
+
+  // 通知は一定間隔（例: 200ms）で行う（iPad対策）
+  if (currentMillis - lastNotifyTime > 200) {
+    if (deviceConnected) {
+      
+      // RPM通知
+      uint8_t data_buff[2];
+      data_buff[0] = (uint8_t)(hz & 0xFF);
+      data_buff[1] = (uint8_t)((hz >> 8) & 0xFF);
+      pCharacteristic->setValue(data_buff, 2);
+      pCharacteristic->notify();
+
+      // 温度通知（毎回送る必要がなければフラグで制御）
+      float Aout = float(analogRead(THERMISTOR_PIN));
+      float Rt = DIVIDER * Aout / (4096.0 - Aout);
+      uint8_t tempVal = (uint8_t)calcTemp(Rt);
+      pCharacteristic2->setValue(&tempVal, 1);
+      pCharacteristic2->notify();
+
+      // スイッチ通知
+      pCharacteristic3->setValue(&value3, 1);
+      pCharacteristic3->notify();
+      value3 = 0;
+
+      lastNotifyTime = currentMillis;
+    }
+  }
+
+  // 切断時のアドバタイズ再開ロジック（既存のまま）
+  if (!deviceConnected && oldDeviceConnected) {
+    delay(500);
+    pServer->startAdvertising();
+    oldDeviceConnected = deviceConnected;
+  }
+  if (deviceConnected && !oldDeviceConnected) {
+    oldDeviceConnected = deviceConnected;
+  }
+}
