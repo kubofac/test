@@ -1,53 +1,91 @@
-// --- loop内のみ抜粋修正 ---
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLE Debug Test</title>
+    <style>
+        body { background: #000; color: #00FF00; font-family: monospace; padding: 20px; }
+        .box { border: 1px solid #333; padding: 15px; margin-bottom: 10px; border-radius: 8px; }
+        .label { color: #888; font-size: 12px; }
+        .val { font-size: 32px; font-weight: bold; }
+        button { width: 100%; padding: 20px; font-size: 18px; font-weight: bold; background: #444; color: #fff; border: none; border-radius: 10px; margin-top: 20px; }
+        #log { font-size: 12px; color: #aaa; height: 150px; overflow-y: auto; background: #111; padding: 10px; margin-top: 20px; }
+    </style>
+</head>
+<body>
 
-void loop() {
-  unsigned long currentMillis = millis();
-  static unsigned long lastNotifyTime = 0;
+    <h2>BLE DEBUG TEST</h2>
 
-  // パルス入力チェック（whileで止めない）
-  if (flag) {
-    float hzz = (1000000.0 / (period));
-    uint16_t hz = round(hzz);
-    // ... RPM計算ロジック ...
-    flag = false; 
-  } else {
-    // 信号が一定時間（例：500ms）来なければ0にする処理をここに入れると親切
-  }
+    <div class="box">
+        <div class="label">RAW DATA (RPM Characteristic)</div>
+        <div id="raw_rpm" class="val">WAITING...</div>
+    </div>
 
-  // 通知は一定間隔（例: 200ms）で行う（iPad対策）
-  if (currentMillis - lastNotifyTime > 200) {
-    if (deviceConnected) {
-      
-      // RPM通知
-      uint8_t data_buff[2];
-      data_buff[0] = (uint8_t)(hz & 0xFF);
-      data_buff[1] = (uint8_t)((hz >> 8) & 0xFF);
-      pCharacteristic->setValue(data_buff, 2);
-      pCharacteristic->notify();
+    <div class="box">
+        <div class="label">RAW DATA (TEMP Characteristic)</div>
+        <div id="raw_temp" class="val">WAITING...</div>
+    </div>
 
-      // 温度通知（毎回送る必要がなければフラグで制御）
-      float Aout = float(analogRead(THERMISTOR_PIN));
-      float Rt = DIVIDER * Aout / (4096.0 - Aout);
-      uint8_t tempVal = (uint8_t)calcTemp(Rt);
-      pCharacteristic2->setValue(&tempVal, 1);
-      pCharacteristic2->notify();
+    <button id="connectBtn">CONNECT SENSOR</button>
 
-      // スイッチ通知
-      pCharacteristic3->setValue(&value3, 1);
-      pCharacteristic3->notify();
-      value3 = 0;
+    <div id="log">--- System Log ---<br></div>
 
-      lastNotifyTime = currentMillis;
-    }
-  }
+    <script>
+        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const PULSE_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
+        const TEMP_UUID = "ac98b174-608a-41f2-aa83-7e55432fafa9";
 
-  // 切断時のアドバタイズ再開ロジック（既存のまま）
-  if (!deviceConnected && oldDeviceConnected) {
-    delay(500);
-    pServer->startAdvertising();
-    oldDeviceConnected = deviceConnected;
-  }
-  if (deviceConnected && !oldDeviceConnected) {
-    oldDeviceConnected = deviceConnected;
-  }
-}
+        function addLog(msg) {
+            const log = document.getElementById('log');
+            log.innerHTML += `> ${msg}<br>`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        document.getElementById('connectBtn').onclick = async () => {
+            addLog("Starting Scan...");
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [SERVICE_UUID] }]
+                });
+
+                addLog("Connecting to GATT...");
+                const server = await device.gatt.connect();
+                
+                addLog("Discovering Service...");
+                const service = await server.getPrimaryService(SERVICE_UUID);
+
+                // --- RPM Test ---
+                addLog("Setting up RPM...");
+                const pC = await service.getCharacteristic(PULSE_UUID);
+                await new Promise(r => setTimeout(r, 1000));
+                await pC.startNotifications();
+                pC.oncharacteristicvaluechanged = (e) => {
+                    const data = e.target.value;
+                    let val = data.byteLength >= 2 ? data.getUint16(0, true) : data.getUint8(0);
+                    document.getElementById('raw_rpm').textContent = val + " (len:" + data.byteLength + ")";
+                };
+
+                // --- TEMP Test ---
+                addLog("Setting up TEMP...");
+                await new Promise(r => setTimeout(r, 1500));
+                const tC = await service.getCharacteristic(TEMP_UUID);
+                await new Promise(r => setTimeout(r, 1000));
+                await tC.startNotifications();
+                tC.oncharacteristicvaluechanged = (e) => {
+                    const val = e.target.value.getUint8(0);
+                    document.getElementById('raw_temp').textContent = val;
+                };
+
+                document.getElementById('connectBtn').style.background = "green";
+                document.getElementById('connectBtn').textContent = "CONNECTED";
+                addLog("ALL SYSTEMS READY");
+
+            } catch (e) {
+                addLog("ERROR: " + e.message);
+                console.error(e);
+            }
+        };
+    </script>
+</body>
+</html>
