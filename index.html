@@ -2,54 +2,84 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>FINAL CHECK kfac</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>kfac DUAL MONITOR</title>
     <style>
-        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; text-align: center; }
-        .val { font-size: 60px; color: #fff; font-weight: bold; display: block; }
-        button { width: 100%; padding: 20px; background: #E4002B; color: #fff; border-radius: 10px; border: none; font-size: 18px; }
-        #log { font-size: 11px; color: #aaa; height: 150px; overflow-y: auto; border: 1px solid #333; margin-top: 10px; text-align: left; padding: 5px; }
+        body { background: #000; color: #0f0; font-family: 'Courier New', monospace; padding: 20px; text-align: center; }
+        .display-container { border: 2px solid #333; border-radius: 20px; background: #111; padding: 30px; margin-bottom: 20px; }
+        .label { color: #888; font-size: 14px; margin-bottom: 5px; }
+        .val { font-size: 72px; color: #fff; font-weight: bold; display: block; line-height: 1; }
+        .unit { font-size: 20px; margin-bottom: 20px; display: block; }
+        button { width: 100%; padding: 25px; background: #E4002B; color: #fff; border-radius: 15px; border: none; font-size: 22px; font-weight: bold; cursor: pointer; }
+        button:active { background: #b30022; }
+        #log { font-size: 12px; color: #555; height: 100px; overflow-y: auto; text-align: left; margin-top: 20px; border-top: 1px solid #222; padding-top: 10px; }
     </style>
 </head>
 <body>
-    <div style="border:1px solid #444; margin:10px; padding:20px;">
-        Hz: <span id="hz_val" class="val">0</span>
-        Temp: <span id="temp_val" class="val">0</span>
+
+    <div class="display-container">
+        <div class="label">ROTATION</div>
+        <span id="hz" class="val">0</span>
+        <span class="unit">Hz</span>
+
+        <div style="height: 2px; background: #222; margin: 30px 0;"></div>
+
+        <div class="label">WATER TEMP</div>
+        <span id="temp" class="val">0</span>
+        <span class="unit">°C</span>
     </div>
-    <button id="connect">CONNECT</button>
-    <div id="log">Logs:<br></div>
+
+    <button id="connectBtn">CONNECT START</button>
+    <div id="log">System Ready...</div>
 
     <script>
         const S_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
         const C_UUID = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
-        function addLog(m) { const l = document.getElementById('log'); l.innerHTML += `> ${m}<br>`; l.scrollTop = l.scrollHeight; }
+        
+        const log = (m) => {
+            const el = document.getElementById('log');
+            el.innerHTML += `<br>> ${m}`;
+            el.scrollTop = el.scrollHeight;
+        };
 
-        document.getElementById('connect').onclick = async () => {
+        document.getElementById('connectBtn').onclick = async () => {
             try {
-                addLog("Scanning for kfac-ultimate...");
-                const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [S_UUID] }] });
-                const server = await dev.gatt.connect();
-                addLog("Connected! Waiting 2sec...");
+                log("Searching...");
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [S_UUID] }]
+                });
+
+                const server = await device.gatt.connect();
+                log("GATT Connected.");
                 
                 await new Promise(r => setTimeout(r, 2000));
                 const service = await server.getPrimaryService(S_UUID);
                 const char = await service.getCharacteristic(C_UUID);
 
-                // 【重要】書き方を「addEventListener」に変更して、確実に拾う
-                char.addEventListener('characteristicvaluechanged', (event) => {
-                    const d = event.target.value;
-                    addLog(`RAW: [${d.getUint8(0)}, ${d.getUint8(1)}, ${d.getUint8(2)}]`);
+                char.addEventListener('characteristicvaluechanged', (e) => {
+                    const d = e.target.value;
+                    if (d.byteLength >= 3) {
+                        // バイト分解
+                        let hLow = d.getUint8(0);
+                        let hHigh = d.getUint8(1);
+                        let tVal = d.getUint8(2);
 
-                    let hz = d.getUint8(0) | (d.getUint8(1) << 8);
-                    let temp = d.getUint8(2);
-
-                    document.getElementById('hz_val').innerText = hz;
-                    document.getElementById('temp_val').innerText = temp;
+                        // 合成
+                        let hzSum = (hHigh << 8) | hLow;
+                        
+                        document.getElementById('hz').innerText = hzSum;
+                        document.getElementById('temp').innerText = tVal;
+                    }
                 });
 
                 await char.startNotifications();
-                addLog("NOTIFY START - Waiting for data...");
+                log("Monitoring Started.");
+                document.getElementById('connectBtn').innerText = "CONNECTED";
+                document.getElementById('connectBtn').style.background = "#004098";
 
-            } catch (e) { addLog("ERR: " + e); }
+            } catch (err) {
+                log("Error: " + err);
+            }
         };
     </script>
 </body>
