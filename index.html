@@ -3,34 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>iPad BLE DUAL MONITOR</title>
+    <title>kfac DUAL MONITOR</title>
     <style>
-        body { background: #000; color: #00FF00; font-family: monospace; padding: 20px; font-size: 14px; }
-        .box { border: 1px solid #444; padding: 15px; margin-bottom: 10px; border-radius: 8px; background: #111; }
-        .label { color: #888; font-size: 11px; text-transform: uppercase; }
-        .val-container { display: flex; justify-content: space-around; align-items: center; }
-        .val-group { text-align: center; }
-        .val { font-size: 48px; font-weight: bold; color: #fff; display: block; }
-        .unit { font-size: 14px; color: #00FF00; }
-        button { width: 100%; padding: 20px; font-size: 18px; font-weight: bold; background: #E4002B; color: #fff; border: none; border-radius: 10px; cursor: pointer; }
-        #log { font-size: 10px; color: #aaa; height: 200px; overflow-y: auto; background: #050505; padding: 10px; margin-top: 15px; border: 1px solid #333; }
+        body { background: #000; color: #00FF00; font-family: monospace; padding: 20px; text-align: center; }
+        .box-container { display: flex; justify-content: space-around; margin-bottom: 20px; }
+        .box { border: 2px solid #444; padding: 20px; border-radius: 15px; background: #111; width: 45%; }
+        .label { color: #888; font-size: 14px; margin-bottom: 10px; }
+        .val { font-size: 60px; font-weight: bold; color: #fff; display: block; }
+        .unit { font-size: 18px; color: #00FF00; }
+        button { width: 100%; padding: 25px; font-size: 20px; font-weight: bold; background: #E4002B; color: #fff; border: none; border-radius: 15px; cursor: pointer; box-shadow: 0 4px #99001d; }
+        button:active { transform: translateY(2px); box-shadow: 0 2px #99001d; }
+        #log { font-size: 12px; color: #aaa; height: 150px; overflow-y: auto; background: #050505; padding: 10px; margin-top: 20px; border: 1px solid #333; text-align: left; }
     </style>
 </head>
 <body>
 
-    <div class="box">
-        <div class="val-container">
-            <div class="val-group">
-                <div class="label">Rotation</div>
-                <span id="display_hz" class="val">---</span>
-                <span class="unit">Hz</span>
-            </div>
-            <div style="width: 1px; height: 50px; background: #333;"></div>
-            <div class="val-group">
-                <div class="label">Temperature</div>
-                <span id="display_temp" class="val">---</span>
-                <span class="unit">°C</span>
-            </div>
+    <div class="box-container">
+        <div class="box">
+            <div class="label">ROTATION</div>
+            <span id="display_hz" class="val">0</span>
+            <span class="unit">Hz</span>
+        </div>
+        <div class="box">
+            <div class="label">TEMP</div>
+            <span id="display_temp" class="val">0</span>
+            <span class="unit">°C</span>
         </div>
     </div>
 
@@ -39,7 +36,6 @@
     <div id="log">--- System Debug Log ---<br></div>
 
     <script>
-        // 成功実績のあるUUIDをそのまま使用
         const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
         const PULSE_UUID   = "f4deb353-a4cf-4ffb-badb-2a5f2e3bb630";
 
@@ -50,61 +46,48 @@
         }
 
         document.getElementById('connectBtn').onclick = async () => {
-            addLog("Step 1: Scanning for kfac...");
             try {
+                addLog("Scanning...");
                 const device = await navigator.bluetooth.requestDevice({
                     filters: [{ services: [SERVICE_UUID] }]
                 });
 
-                addLog("Step 2: Connecting to GATT...");
+                addLog("Connecting...");
                 const server = await device.gatt.connect();
                 
-                addLog("Step 3: Stability Wait (2s)...");
-                await new Promise(r => setTimeout(r, 2000));
+                addLog("Waiting for stability...");
+                await new Promise(r => setTimeout(r, 1500));
 
-                addLog("Step 4: Getting Service...");
                 const service = await server.getPrimaryService(SERVICE_UUID);
                 const pC = await service.getCharacteristic(PULSE_UUID);
 
-                // --- 初回読み取りテスト ---
-                addLog("Step 5: Initial Read Test...");
-                const initData = await pC.readValue();
-                if (initData.byteLength >= 3) {
-                    addLog("READ SUCCESS: 3 bytes detected");
-                }
-
-                // --- 通知開始 ---
-                addLog("Step 6: Starting Notifications...");
-                await new Promise(r => setTimeout(r, 1000));
+                addLog("Enabling Notifications...");
                 await pC.startNotifications();
                 
                 pC.oncharacteristicvaluechanged = (e) => {
                     const data = e.target.value;
                     
-                    // 相乗りデータの分解 [Byte0:Hz低, Byte1:Hz高, Byte2:Temp]
+                    // 【重要】データの長さをチェックして分解
                     if (data.byteLength >= 3) {
-                        let hz = data.getUint16(0, true);
-                        let temp = data.getUint8(2);
+                        // ESP32から: [Byte0(L), Byte1(H), Byte2(Temp)] で届く
+                        let hz = data.getUint16(0, true); // 小さい順(Little Endian)で2バイト読み取り
+                        let temp = data.getUint8(2);      // 3番目のバイトを読み取り
                         
                         document.getElementById('display_hz').textContent = hz;
                         document.getElementById('display_temp').textContent = temp;
-                        
-                        // ログが多すぎると重くなるので、受信確認のみ
-                        if(Math.random() > 0.9) addLog("Update - Hz: " + hz + " T: " + temp);
-                    } else {
-                        // 100だけ送られてきた場合のフォールバック
-                        let val = data.byteLength >= 2 ? data.getUint16(0, true) : data.getUint8(0);
-                        document.getElementById('display_hz').textContent = val;
+                    } else if (data.byteLength === 2) {
+                        // もし2バイト（100のみ）しか来ていない場合の処理
+                        let hz = data.getUint16(0, true);
+                        document.getElementById('display_hz').textContent = hz;
                     }
                 };
 
-                addLog("MONITORING START: Running...");
+                addLog("MONITORING START");
+                document.getElementById('connectBtn').innerText = "CONNECTED";
                 document.getElementById('connectBtn').style.background = "#004098";
-                document.getElementById('connectBtn').textContent = "CONNECTED";
 
             } catch (e) {
-                addLog("FATAL ERROR: " + e.message);
-                console.error(e);
+                addLog("ERROR: " + e.message);
             }
         };
     </script>
